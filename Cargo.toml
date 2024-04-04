@@ -1,0 +1,8 @@
+[package]
+name = "camerars"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = {version = "4.5.4", features = ["derive"]}
+ffmpeg-next = { version = "6.1.1", features = ["default", "build", "codec", "format"] }
