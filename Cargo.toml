@@ -4,5 +4,34 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = {version = "4.5.4", features = ["derive"]}
-ffmpeg-next = { version = "6.1.1", features = ["default", "build", "codec", "format"] }
+dotenvy = "0.15.7"
+
+[dependencies.bytes]
+version = "1"
+
+[dependencies.clap]
+version = "4.5.4"
+features = ["derive"]
+
+[dependencies.ffmpeg-next]
+version = "6.1.1"
+features = ["default", "build", "codec", "format"]
+
+[dependencies.tracing]
+version = "0.1.40"
+
+[dependencies.tracing-subscriber]
+version = "0.3.18"
+features = ["default", "serde", "serde_json"]
+
+
+[dependencies.tokio]
+version = "1.37.0"
+features = ["rt-multi-thread", "net", "fs"]
+
+[dependencies.object_store]
+version = "0.9.1"
+features = ["aws"]
+
+[dependencies.thiserror]
+version = "1.0"

@@ -1,19 +1,25 @@
+use std::fs::File;
+use std::ops::Mul;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{channel, Receiver};
 
+use ffmpeg_next::{format, Rational};
 use ffmpeg_next::codec::Parameters;
-use ffmpeg_next::format;
 use ffmpeg_next::format::context::Input;
 use ffmpeg_next::media::Type;
+use tracing::info;
 
-use crate::chunk::ChunkWriter;
+use crate::chunk::{ChunkWriter, ChunkWriterFactory};
+use crate::upload::Uploader;
 
 pub struct Pipeline {
     input_context: Input,
-    video_index: usize,
     audio_index: Option<usize>,
     video_parameters: Parameters,
     audio_parameters: Option<Parameters>,
     index_mapping: Vec<usize>,
+    roll_seconds: u32,
 }
 
 impl Pipeline {
@@ -37,8 +43,6 @@ impl Pipeline {
             input_context.stream(audio_index).unwrap().parameters().to_owned()
         });
 
-        // Each of these should matter here instead.
-        // If we haven't done this, then we're screwed.
         let mut index_mapping = vec![usize::MAX; input_context.streams().len()];
         index_mapping[video_index] = 0;
         if let Some(audio_index) = audio_index {
@@ -47,42 +51,84 @@ impl Pipeline {
 
         Self {
             input_context,
-            video_index,
             audio_index,
             video_parameters,
             audio_parameters,
             index_mapping,
+            roll_seconds: 10,
         }
     }
 
-    pub fn run<C: ChunkWriter>(
+    pub fn with_roll_seconds(mut self, new_roll_seconds: u32) -> Self {
+        self.roll_seconds = new_roll_seconds;
+
+        self
+    }
+
+
+    pub fn run<F: ChunkWriterFactory>(
         &mut self,
-        chunk_writer: &mut C,
+        chunk_writers: &mut F,
+        chunk_uploader: impl Uploader + 'static,
     ) {
+        info!("begin pipeline");
+        let mut chunk_writer = chunk_writers.next();
+        let metadata = self.input_context.metadata().to_owned().clone();
         chunk_writer.begin(
-            self.input_context.metadata().to_owned(),
-            self.video_parameters.clone(), self.audio_parameters.clone());
+            &metadata,
+            self.video_parameters.clone(),
+            self.audio_parameters.clone());
 
         let video_packets = AtomicU64::new(0);
         let audio_packets = AtomicU64::new(0);
         let unknown_packets = AtomicU64::new(0);
 
+        let (tx, rx) = channel::<PathBuf>();
+        std::thread::spawn(move || {
+            do_upload(chunk_uploader, rx);
+        });
+
+        let mut start_pts = -1;
         for (stream, packet) in self.input_context.packets() {
             let out_index = self.index_mapping[stream.index()];
 
-            match out_index {
+            let should_roll = match out_index {
                 _ if out_index == 0 => {
+                    let pts = packet.pts().unwrap_or_default();
                     chunk_writer.write_video(packet, stream.time_base());
                     video_packets.fetch_add(1, Ordering::SeqCst);
+
+                    if start_pts < 0 {
+                        start_pts = pts;
+                        false
+                    } else {
+                        // check if we should roll
+                        should_roll(start_pts, pts, stream.time_base(), self.roll_seconds)
+                    }
                 }
                 _ if out_index == 1 && self.audio_index.is_some() => {
                     chunk_writer.write_audio(packet, stream.time_base());
                     audio_packets.fetch_add(1, Ordering::SeqCst);
+                    false
                 }
-
                 _ => {
                     unknown_packets.fetch_add(1, Ordering::SeqCst);
+                    false
                 }
+            };
+
+            if should_roll {
+                info!("rolling output file");
+                let file_path = chunk_writer.end();
+                start_pts = -1;
+
+                tx.send(file_path).unwrap();
+
+                chunk_writer = chunk_writers.next();
+                chunk_writer.begin(
+                    &metadata,
+                    self.video_parameters.clone(),
+                    self.audio_parameters.clone());
             }
         }
 
@@ -93,6 +139,23 @@ impl Pipeline {
             video_packets.fetch_add(0, Ordering::Relaxed),
             audio_packets.fetch_add(0, Ordering::Relaxed),
             unknown_packets.fetch_add(0, Ordering::Relaxed),
+        );
+    }
+}
+
+fn should_roll(start_pts: i64, current_pts: i64, time_base: Rational, roll_seconds: u32) -> bool {
+    let delta = current_pts - start_pts;
+
+    Rational(delta as _, 1).mul(time_base) > Rational(roll_seconds as _, 1)
+}
+
+fn do_upload(chunk_uploader: impl Uploader + 'static, rx: Receiver<PathBuf>) {
+    while let Ok(msg) = rx.recv() {
+        let name = msg.file_name().unwrap().to_str().unwrap();
+        let file = File::open(&msg).unwrap();
+        chunk_uploader.upload_chunk(
+            name,
+            &file,
         );
     }
 }
