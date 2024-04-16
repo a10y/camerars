@@ -3,14 +3,18 @@ use std::ops::Mul;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
 
-use ffmpeg_next::{format, Rational};
+use chrono::{Utc};
 use ffmpeg_next::codec::Parameters;
 use ffmpeg_next::format::context::Input;
 use ffmpeg_next::media::Type;
+use ffmpeg_next::{format, Rational};
 use tracing::info;
 
 use crate::chunk::{ChunkWriter, ChunkWriterFactory};
+use crate::db::Database;
+use crate::playlist::{OnDemandTimeRange, Playlist, PlaylistFile, PlaylistKind};
 use crate::upload::Uploader;
 
 pub struct Pipeline {
@@ -26,21 +30,30 @@ impl Pipeline {
     /// Create a pipeline from an input stream (could be RTSP, file, MPEG-TS, etc.).
     /// Provide it with a chunk writer factory as well. So that way we can
     pub fn from<S: AsRef<str>>(url: S) -> Self {
-        let input_context = format::input(&String::from(url.as_ref()))
-            .expect("open input format");
+        let input_context = format::input(&String::from(url.as_ref())).expect("open input format");
 
-        let video_index = input_context.streams()
+        let video_index = input_context
+            .streams()
             .best(Type::Video)
             .expect("expected input to contain at least one video stream")
             .index();
 
-        let audio_index = input_context.streams()
+        let audio_index = input_context
+            .streams()
             .best(Type::Audio)
             .map(|stream| stream.index());
 
-        let video_parameters = input_context.stream(video_index).unwrap().parameters().to_owned();
+        let video_parameters = input_context
+            .stream(video_index)
+            .unwrap()
+            .parameters()
+            .to_owned();
         let audio_parameters = audio_index.map(|audio_index| {
-            input_context.stream(audio_index).unwrap().parameters().to_owned()
+            input_context
+                .stream(audio_index)
+                .unwrap()
+                .parameters()
+                .to_owned()
         });
 
         let mut index_mapping = vec![usize::MAX; input_context.streams().len()];
@@ -65,11 +78,11 @@ impl Pipeline {
         self
     }
 
-
-    pub fn run<F: ChunkWriterFactory>(
+    pub fn run<F: ChunkWriterFactory, U: Uploader + 'static>(
         &mut self,
         chunk_writers: &mut F,
-        chunk_uploader: impl Uploader + 'static,
+        chunk_uploader: Arc<U>,
+        database: &Database,
     ) {
         info!("begin pipeline");
         let mut chunk_writer = chunk_writers.next();
@@ -77,16 +90,20 @@ impl Pipeline {
         chunk_writer.begin(
             &metadata,
             self.video_parameters.clone(),
-            self.audio_parameters.clone());
+            self.audio_parameters.clone(),
+        );
 
         let video_packets = AtomicU64::new(0);
         let audio_packets = AtomicU64::new(0);
         let unknown_packets = AtomicU64::new(0);
 
         let (tx, rx) = channel::<PathBuf>();
+        let chunk_uploader = Arc::clone(&chunk_uploader);
         std::thread::spawn(move || {
             do_upload(chunk_uploader, rx);
         });
+
+        let mut current_chunk_start = Utc::now();
 
         let mut start_pts = -1;
         for (stream, packet) in self.input_context.packets() {
@@ -122,13 +139,24 @@ impl Pipeline {
                 let file_path = chunk_writer.end();
                 start_pts = -1;
 
+                // Update DB with new file
+                database.append_file(
+                    current_chunk_start,
+                    PlaylistFile {
+                        duration: 15.16, // TODO(aduffy) this is hard-coded, bad.
+                        id: file_path.file_name().unwrap().to_str().unwrap().to_string(),
+                    },
+                );
+
                 tx.send(file_path).unwrap();
 
                 chunk_writer = chunk_writers.next();
                 chunk_writer.begin(
                     &metadata,
                     self.video_parameters.clone(),
-                    self.audio_parameters.clone());
+                    self.audio_parameters.clone(),
+                );
+                current_chunk_start = Utc::now();
             }
         }
 
@@ -146,16 +174,37 @@ impl Pipeline {
 fn should_roll(start_pts: i64, current_pts: i64, time_base: Rational, roll_seconds: u32) -> bool {
     let delta = current_pts - start_pts;
 
-    Rational(delta as _, 1).mul(time_base) > Rational(roll_seconds as _, 1)
+    Rational(delta as _, 1).mul(time_base) >= Rational(roll_seconds as _, 1)
 }
 
-fn do_upload(chunk_uploader: impl Uploader + 'static, rx: Receiver<PathBuf>) {
+fn do_upload<U: Uploader + 'static>(chunk_uploader: Arc<U>, rx: Receiver<PathBuf>) {
     while let Ok(msg) = rx.recv() {
         let name = msg.file_name().unwrap().to_str().unwrap();
         let file = File::open(&msg).unwrap();
-        chunk_uploader.upload_chunk(
-            name,
-            &file,
-        );
+        chunk_uploader.upload_chunk(name, &file);
+    }
+}
+
+#[derive(Clone)]
+pub struct PlaylistBuilder {
+    db: Database,
+}
+
+impl PlaylistBuilder {
+    pub fn new(db: &Database) -> Self {
+        Self { db: db.clone() }
+    }
+}
+
+impl PlaylistBuilder {
+    pub fn build_on_demand(&self, time_range: OnDemandTimeRange) -> Playlist {
+        let files = self
+            .db
+            .query_files(Some(time_range.start), Some(time_range.end));
+
+        Playlist {
+            kind: PlaylistKind::VOD,
+            files,
+        }
     }
 }

@@ -1,24 +1,22 @@
-use ffmpeg_next::{Dictionary, Packet, Rational};
 use ffmpeg_next::codec::Parameters;
+use ffmpeg_next::{Dictionary, Packet, Rational};
 
 pub mod file;
 
 mod private {
     pub trait Sealed {}
 
-
     // Impls
     impl Sealed for crate::chunk::file::FileChunkWriter {}
 }
 
-
 pub trait ChunkWriter: private::Sealed {
-    fn current_chunk_id(&self) -> usize;
-
-    fn begin(&mut self,
-             metadata: &Dictionary<'static>,
-             video_params: Parameters,
-             audio_params: Option<Parameters>);
+    fn begin(
+        &mut self,
+        metadata: &Dictionary<'static>,
+        video_params: Parameters,
+        audio_params: Option<Parameters>,
+    );
 
     fn video_timebase(&self) -> Rational;
 
