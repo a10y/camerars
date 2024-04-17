@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use warp::filters::BoxedFilter;
 use warp::reply::Response;
 use warp::{http, Filter, Reply};
@@ -34,13 +35,10 @@ pub fn make_server<U: Uploader + 'static>(
 ) -> BoxedFilter<(impl Reply,)> {
     let uploader = Arc::clone(&uploader);
 
-    let files = warp::path!("files").map(|| "all files");
     let file = warp::path!("files" / String).map(move |file_id: String| {
         let file_data = uploader.read_chunk(file_id.as_str());
         TsFile { data: file_data }
     });
-
-    let live = warp::path!("live").map(|| "RETURN LIVE DATA LATER");
 
     let vod = warp::path!("vod").and(warp::query::<VodQueryParams>()).map(
         move |vod_query_params: VodQueryParams| {
@@ -54,11 +52,5 @@ pub fn make_server<U: Uploader + 'static>(
         },
     );
 
-    // Read-only access to SQLite local file used for finding the set of indexes that should
-    // be deleted.
-    // We can keep track of which have been removed from our remote storage infra as well.
-    // If we age things off the back, then we should be able to avoid stuff while people have
-    // outbound connections instead.
-
-    warp::get().and(files.or(file).or(live).or(vod)).boxed()
+    warp::get().and(file.or(vod)).boxed()
 }

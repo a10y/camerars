@@ -13,7 +13,7 @@ use camerars::db::Database;
 use camerars::execution::{Pipeline, PlaylistBuilder};
 use camerars::server::make_server;
 use camerars::upload::s3;
-use camerars::upload::s3::{S3UploaderConfig};
+use camerars::upload::s3::S3UploaderConfig;
 
 #[derive(Parser)]
 pub struct Cli {
@@ -70,7 +70,6 @@ pub fn main() {
     let uploader = Arc::new(uploader);
     let server_uploader = Arc::clone(&uploader);
 
-    // Move everything into an async runtime in this way.
     runtime.spawn(async move {
         let playlist_builder = PlaylistBuilder::new(&db_server);
         let service = make_server(playlist_builder, server_uploader);

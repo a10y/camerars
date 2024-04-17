@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use chrono::{Utc};
+use chrono::Utc;
 use ffmpeg_next::codec::Parameters;
 use ffmpeg_next::format::context::Input;
 use ffmpeg_next::media::Type;
