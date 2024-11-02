@@ -5,5 +5,6 @@ pub mod upload;
 pub mod playlist;
 
 pub mod db;
-mod reply;
+pub mod reply;
 pub mod server;
+pub mod sync;

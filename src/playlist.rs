@@ -2,17 +2,19 @@
 
 use chrono::{DateTime, Utc};
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum PlaylistKind {
     VOD,
     LIVE,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct Playlist {
     pub kind: PlaylistKind,
     pub files: Vec<PlaylistFile>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct OnDemandTimeRange {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,

@@ -7,6 +7,7 @@ use object_store::ObjectStore;
 use tokio::runtime::Handle;
 use tracing::{info, instrument};
 
+use crate::sync::do_sync;
 use crate::upload::Uploader;
 
 #[derive(Clone)]
@@ -51,14 +52,13 @@ impl Deref for Path {
 }
 
 pub fn new_s3_uploader(
-    credentials: &S3UploaderConfig,
+    // credentials: &S3UploaderConfig,
     prefix: impl Into<Path>,
     runtime: Handle,
 ) -> ObjectStoreUploader {
-    let object_store = object_store::aws::AmazonS3Builder::new()
-        .with_access_key_id(&credentials.access_key_id)
-        .with_secret_access_key(&credentials.secret_access_key)
-        .with_bucket_name(&credentials.bucket)
+    // Optional endpoint config.
+
+    let object_store = object_store::aws::AmazonS3Builder::from_env()
         .build()
         .expect("expected S3 client to build");
 
@@ -106,12 +106,10 @@ impl Uploader for ObjectStoreUploader {
         let target_path = object_store::path::Path::from(self.prefix.clone()).child(name);
 
         let object_store = Arc::clone(&self.object_store);
+
+        // TODO(aduffy): Spawn a new thread to do the async work.
         std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            let data = runtime.block_on(async move {
+            let data = do_sync(async move {
                 object_store
                     .get(&target_path)
                     .await

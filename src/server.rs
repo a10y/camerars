@@ -1,34 +1,18 @@
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use warp::filters::BoxedFilter;
-use warp::reply::Response;
-use warp::{http, Filter, Reply};
+use warp::{Filter, Reply};
 
 use crate::execution::PlaylistBuilder;
 use crate::playlist::OnDemandTimeRange;
+use crate::server::types::{TsFile, VodQueryParams};
 use crate::upload::Uploader;
 
-#[derive(Serialize, Deserialize)]
-pub struct VodQueryParams {
-    pub start_time: DateTime<Utc>,
-    pub end_time: DateTime<Utc>,
-}
+pub mod types;
 
-struct TsFile {
-    data: Vec<u8>,
-}
+// Create a new output type node instead here.
 
-impl Reply for TsFile {
-    fn into_response(self) -> Response {
-        http::Response::builder()
-            .header("content-type", "video/MP2T")
-            .body(self.data.into())
-            .unwrap()
-    }
-}
-
+/// Server factory, builds a
 pub fn make_server<U: Uploader + 'static>(
     pb: PlaylistBuilder,
     uploader: Arc<U>,

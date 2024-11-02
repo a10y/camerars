@@ -213,6 +213,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "ffmpeg-next",
+ "lazy_static",
  "object_store",
  "rusqlite",
  "serde",

@@ -47,3 +47,6 @@ features = ["default", "serde", "now"]
 [dependencies.rusqlite]
 version = "0.31"
 features = ["bundled", "chrono"]
+
+[dependencies.lazy_static]
+version = "1.4.0"
