@@ -1,10 +1,9 @@
 extern crate ffmpeg_next as ffmpeg;
 
-use std::env;
 use std::sync::Arc;
 
 use clap::Parser;
-use dotenvy::dotenv_override;
+use dotenvy::{dotenv, dotenv_override};
 use tracing::info;
 
 use camerars::chunk::file::FileChunkWriterFactory;
@@ -22,7 +21,7 @@ pub struct Cli {
 
 pub fn main() {
     tracing_subscriber::fmt::init();
-    dotenv_override().unwrap();
+    dotenv_override().ok();
 
     ffmpeg::init().expect("ffmpeg initialization should succeed");
 
