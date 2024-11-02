@@ -3,7 +3,7 @@ extern crate ffmpeg_next as ffmpeg;
 use std::sync::Arc;
 
 use clap::Parser;
-use dotenvy::{dotenv, dotenv_override};
+use dotenvy::dotenv_override;
 use tracing::info;
 
 use camerars::chunk::file::FileChunkWriterFactory;
