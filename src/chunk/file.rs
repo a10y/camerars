@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use ffmpeg_next::codec::Parameters;
 use ffmpeg_next::format::context::Output;
 use ffmpeg_next::{codec, encoder, format, Dictionary, Packet, Rational};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::chunk::{ChunkWriter, ChunkWriterFactory};
 
@@ -15,7 +15,6 @@ pub struct FileChunkWriterFactory {
 impl FileChunkWriterFactory {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
-            // TODO(aduffy): support reading from disk to find newest sequence number.
             seq_num: 0,
             directory: path.as_ref().to_path_buf(),
         }
@@ -25,6 +24,31 @@ impl FileChunkWriterFactory {
 impl ChunkWriterFactory for FileChunkWriterFactory {
     type Target = FileChunkWriter;
 
+    fn init(&mut self) {
+        // create the directory.
+        std::fs::create_dir_all(&self.directory).ok();
+
+        // Find the last sequence number
+        self.seq_num = std::fs::read_dir(&self.directory)
+            .expect("directory created in init")
+            .filter_map(|dirent| {
+                let dirent = dirent.expect("dirent readable");
+                if !dirent.file_type().expect("file_type").is_file() {
+                    None
+                } else {
+                    dirent
+                        .file_name()
+                        .to_string_lossy()
+                        .strip_suffix(".ts")
+                        .and_then(|num| num.parse().ok())
+                }
+            })
+            .max()
+            .unwrap_or_default();
+
+        info!("initializing with seq_num {}", self.seq_num);
+    }
+
     fn next(&mut self) -> Self::Target {
         self.seq_num += 1;
 
@@ -32,7 +56,7 @@ impl ChunkWriterFactory for FileChunkWriterFactory {
             &self
                 .directory
                 .clone()
-                .join(format!("{:0>5}.ts", self.seq_num))
+                .join(format!("{:0>9}.ts", self.seq_num))
                 .to_path_buf(),
         )
     }

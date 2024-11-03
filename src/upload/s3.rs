@@ -7,7 +7,6 @@ use object_store::ObjectStore;
 use tokio::runtime::Handle;
 use tracing::{info, instrument};
 
-use crate::sync::do_sync;
 use crate::upload::Uploader;
 
 #[derive(Clone)]
@@ -79,50 +78,41 @@ impl ObjectStoreUploader {
     }
 }
 
-unsafe impl Send for ObjectStoreUploader {}
+// unsafe impl Send for ObjectStoreUploader {}
 
-unsafe impl Sync for ObjectStoreUploader {}
+// unsafe impl Sync for ObjectStoreUploader {}
 
 impl Uploader for ObjectStoreUploader {
     #[instrument(skip_all)]
     fn upload_chunk<R: Read>(&self, name: &str, mut chunk: R) {
         info!(name = name, "Uploading chunk to remote store");
 
-        let target_path = object_store::path::Path::from(self.prefix.clone()).child(name);
+        let target_path = self.prefix.clone().child(name);
         let mut vec = Vec::new();
         chunk
             .read_to_end(&mut vec)
             .expect("expected chunk read to succeed");
         let bytes = Bytes::from(vec);
 
+        let store = self.object_store.clone();
         let _ = self
             .runtime
-            .block_on(async move { self.object_store.put(&target_path, bytes).await })
+            .block_on(async move { store.put(&target_path, bytes).await })
             .expect("object_store put should succeed");
     }
 
-    fn read_chunk(&self, name: &str) -> Vec<u8> {
+    async fn read_chunk(&self, name: &str) -> Vec<u8> {
         info!(name = name, "Reading chunk from remote storage");
-        let target_path = object_store::path::Path::from(self.prefix.clone()).child(name);
+        let target_path = self.prefix.clone().child(name);
 
-        let object_store = Arc::clone(&self.object_store);
-
-        // TODO(aduffy): Spawn a new thread to do the async work.
-        std::thread::spawn(move || {
-            let data = do_sync(async move {
-                object_store
-                    .get(&target_path)
-                    .await
-                    .expect("object_store GET should succeed")
-                    .bytes()
-                    .await
-                    .unwrap()
-                    .to_vec()
-            });
-
-            data
-        })
-        .join()
-        .unwrap()
+        self.object_store
+            .clone()
+            .get(&target_path)
+            .await
+            .expect("object_store GET should succeed")
+            .bytes()
+            .await
+            .unwrap()
+            .to_vec()
     }
 }

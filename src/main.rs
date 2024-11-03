@@ -2,6 +2,7 @@ extern crate ffmpeg_next as ffmpeg;
 
 use std::sync::Arc;
 
+use camerars::chunk::ChunkWriterFactory;
 use clap::Parser;
 use dotenvy::dotenv_override;
 use tracing::info;
@@ -9,7 +10,7 @@ use tracing::info;
 use camerars::chunk::file::FileChunkWriterFactory;
 use camerars::db::Database;
 use camerars::execution::{Pipeline, PlaylistBuilder};
-use camerars::server::make_server;
+use camerars::server::backend;
 use camerars::upload::s3;
 
 #[derive(Parser)]
@@ -32,7 +33,6 @@ pub fn main() {
     let database = Database::file("v0.db");
 
     // Create a new runtime just for serving file requests from disk.
-    let mut chunk_writer = FileChunkWriterFactory::new(&"recordings");
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -46,12 +46,15 @@ pub fn main() {
 
         runtime.spawn(async move {
             let playlist_builder = PlaylistBuilder::new(&database);
-            let service = make_server(playlist_builder, uploader);
+            let service = backend(playlist_builder, uploader);
             info!("Server is running @ 127.0.0.1:3030");
 
             warp::serve(service).run(([127, 0, 0, 1], 3030)).await
         });
     }
+
+    let mut chunk_writer = FileChunkWriterFactory::new("recordings");
+    chunk_writer.init();
 
     Pipeline::from(cli.source.as_str())
         .with_roll_seconds(15)

@@ -34,5 +34,7 @@ pub trait ChunkWriter: private::Sealed {
 pub trait ChunkWriterFactory {
     type Target: ChunkWriter;
 
+    fn init(&mut self);
+
     fn next(&mut self) -> Self::Target;
 }
