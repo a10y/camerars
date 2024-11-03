@@ -1,8 +1,5 @@
-use std::fs::File;
 use std::ops::Mul;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -10,7 +7,9 @@ use ffmpeg_next::codec::Parameters;
 use ffmpeg_next::format::context::Input;
 use ffmpeg_next::media::Type;
 use ffmpeg_next::{format, Rational};
-use tracing::info;
+use tokio::io::AsyncReadExt;
+use tokio::runtime::Handle;
+use tracing::{error, info, warn};
 
 use crate::chunk::{ChunkWriter, ChunkWriterFactory};
 use crate::db::Database;
@@ -24,12 +23,13 @@ pub struct Pipeline {
     audio_parameters: Option<Parameters>,
     index_mapping: Vec<usize>,
     roll_seconds: u32,
+    background_tasks: Handle,
 }
 
 impl Pipeline {
     /// Create a pipeline from an input stream (could be RTSP, file, MPEG-TS, etc.).
     /// Provide it with a chunk writer factory as well. So that way we can
-    pub fn from<S: AsRef<str>>(url: S) -> Self {
+    pub fn from<S: AsRef<str>>(url: S, background_tasks: Handle) -> Self {
         let input_context = format::input(&String::from(url.as_ref())).expect("open input format");
 
         let video_index = input_context
@@ -68,6 +68,7 @@ impl Pipeline {
             video_parameters,
             audio_parameters,
             index_mapping,
+            background_tasks,
             roll_seconds: 10,
         }
     }
@@ -97,12 +98,7 @@ impl Pipeline {
         let audio_packets = AtomicU64::new(0);
         let unknown_packets = AtomicU64::new(0);
 
-        let (tx, rx) = channel::<PathBuf>();
-        let chunk_uploader = Arc::clone(&chunk_uploader);
-        std::thread::spawn(move || {
-            do_upload(chunk_uploader, rx);
-        });
-
+        // spawn a background task to upload the chunk
         let mut current_chunk_start = Utc::now();
 
         let mut start_pts = -1;
@@ -148,7 +144,25 @@ impl Pipeline {
                     },
                 );
 
-                tx.send(file_path).unwrap();
+                // spawn upload task
+                let chunk_uploader = Arc::clone(&chunk_uploader);
+                self.background_tasks.spawn(async move {
+                    for attempt in 0..10 {
+                        let chunk_uploader = Arc::clone(&chunk_uploader);
+
+                        match background_upload(file_path.clone(), chunk_uploader).await {
+                            Ok(()) => {
+                                return;
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "upload attempt {attempt} of 10 failed");
+                                continue;
+                            }
+                        }
+                    }
+
+                    error!("10 failed attempts for upload task {file_path:?}, failing upload");
+                });
 
                 chunk_writer = chunk_writers.next();
                 chunk_writer.begin(
@@ -171,18 +185,31 @@ impl Pipeline {
     }
 }
 
+async fn background_upload<U: Uploader>(
+    file_path: impl AsRef<std::path::Path>,
+    uploader: Arc<U>,
+) -> anyhow::Result<()> {
+    let mut chunk = Vec::new();
+    let mut file = tokio::fs::File::open(file_path.as_ref())
+        .await
+        .expect("open file for upload");
+    file.read_to_end(&mut chunk)
+        .await
+        .expect("read file for upload");
+
+    let file_name = file_path
+        .as_ref()
+        .file_name()
+        .expect("file_name")
+        .to_str()
+        .expect("file_name to str");
+    uploader.upload_chunk(file_name, chunk).await
+}
+
 fn should_roll(start_pts: i64, current_pts: i64, time_base: Rational, roll_seconds: u32) -> bool {
     let delta = current_pts - start_pts;
 
     Rational(delta as _, 1).mul(time_base) >= Rational(roll_seconds as _, 1)
-}
-
-fn do_upload<U: Uploader + 'static>(chunk_uploader: Arc<U>, rx: Receiver<PathBuf>) {
-    while let Ok(msg) = rx.recv() {
-        let name = msg.file_name().unwrap().to_str().unwrap();
-        let file = File::open(&msg).unwrap();
-        chunk_uploader.upload_chunk(name, &file);
-    }
 }
 
 #[derive(Clone)]

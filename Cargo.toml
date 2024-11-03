@@ -7,6 +7,9 @@ edition = "2021"
 dotenvy = "0.15.7"
 serde = { version = "1.0.197", features = ["derive"] }
 
+[dependencies.anyhow]
+version = "1"
+
 [dependencies.bytes]
 version = "1"
 

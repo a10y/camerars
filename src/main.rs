@@ -38,7 +38,7 @@ pub fn main() {
         .build()
         .unwrap();
 
-    let uploader = s3::new_s3_uploader(prefix.as_ref(), runtime.handle().clone());
+    let uploader = s3::new_s3_uploader(prefix.as_ref());
     let uploader = Arc::new(uploader);
     {
         let uploader = Arc::clone(&uploader);
@@ -56,7 +56,7 @@ pub fn main() {
     let mut chunk_writer = FileChunkWriterFactory::new("recordings");
     chunk_writer.init();
 
-    Pipeline::from(cli.source.as_str())
+    Pipeline::from(cli.source.as_str(), runtime.handle().clone())
         .with_roll_seconds(15)
         .run(&mut chunk_writer, Arc::clone(&uploader), &database);
 }
