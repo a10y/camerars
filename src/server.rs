@@ -6,6 +6,7 @@ use warp::{Filter, Reply};
 use crate::execution::PlaylistBuilder;
 use crate::playlist::{OnDemandTimeRange, Playlist};
 use crate::server::types::{TsFile, VodQueryParams};
+use crate::static_assets::{HLS_JS, PLAYER_HTML};
 use crate::upload::Uploader;
 
 pub mod types;
@@ -27,7 +28,23 @@ pub fn backend<U: Uploader + 'static>(
         .and(warp::any().map(move || pb.clone()))
         .then(vod_handler);
 
-    warp::get().and(file_route.or(vod_route)).boxed()
+    // Static asset routes
+    let player_route = warp::path::end()
+        .map(|| warp::reply::html(PLAYER_HTML));
+
+    let hls_route = warp::path!("hls.js")
+        .map(|| warp::reply::with_header(
+            HLS_JS,
+            "content-type",
+            "application/javascript"
+        ));
+
+    warp::get().and(
+        file_route
+            .or(vod_route)
+            .or(player_route)
+            .or(hls_route)
+    ).boxed()
 }
 
 async fn file_handler<U: Uploader>(file_id: String, uploader: Arc<U>) -> TsFile {

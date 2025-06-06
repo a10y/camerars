@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Player</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: #fff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto 30px;
+            background: #222;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .controls {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .time-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .time-input {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .time-input label {
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .time-input input {
+            padding: 8px 12px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #333;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .shortcuts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .shortcuts button {
+            padding: 8px 16px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #333;
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .shortcuts button:hover {
+            background: #555;
+        }
+
+        .load-button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            background: #007AFF;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .load-button:hover {
+            background: #0056CC;
+        }
+
+        .load-button:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
+
+        .status {
+            background: #1a1a1a;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .time-controls {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .shortcuts {
+                justify-content: center;
+            }
+
+            .shortcuts button {
+                flex: 1;
+                min-width: 80px;
+                max-width: 120px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .shortcuts {
+                grid-template-columns: repeat(2, 1fr);
+                display: grid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-container">
+            <video id="video" controls></video>
+        </div>
+
+        <div class="controls">
+            <div class="time-controls">
+                <div class="time-input">
+                    <label for="start-time">Start Time</label>
+                    <input type="datetime-local" id="start-time">
+                </div>
+                <div class="time-input">
+                    <label for="end-time">End Time</label>
+                    <input type="datetime-local" id="end-time">
+                </div>
+            </div>
+
+            <div class="shortcuts">
+                <button onclick="setTimeRange(1)">Last 1 min</button>
+                <button onclick="setTimeRange(5)">Last 5 min</button>
+                <button onclick="setTimeRange(15)">Last 15 min</button>
+                <button onclick="setTimeRange(30)">Last 30 min</button>
+                <button onclick="setTimeRange(60)">Last 1 hour</button>
+                <button onclick="setTimeRange(180)">Last 3 hours</button>
+            </div>
+
+            <button class="load-button" onclick="loadVideo()" id="load-btn">Load Video</button>
+        </div>
+
+
+        <div class="status" id="status">Ready to load video</div>
+    </div>
+
+    <script src="hls.js"></script>
+    <script>
+        let hls = null;
+        const video = document.getElementById('video');
+        const statusDisplay = document.getElementById('status');
+        const loadBtn = document.getElementById('load-btn');
+
+        // Set default end time to now, start time to 15 minutes ago
+        function initializeTimes() {
+            const now = new Date();
+            const fifteenMinutesAgo = new Date(now.getTime() - 15 * 60 * 1000);
+            
+            document.getElementById('end-time').value = formatDateTimeLocal(now);
+            document.getElementById('start-time').value = formatDateTimeLocal(fifteenMinutesAgo);
+        }
+
+        function formatDateTimeLocal(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        }
+
+        function setTimeRange(minutes) {
+            const now = new Date();
+            const startTime = new Date(now.getTime() - minutes * 60 * 1000);
+            
+            document.getElementById('end-time').value = formatDateTimeLocal(now);
+            document.getElementById('start-time').value = formatDateTimeLocal(startTime);
+        }
+
+
+        function loadVideo() {
+            const startInput = document.getElementById('start-time').value;
+            const endInput = document.getElementById('end-time').value;
+            
+            if (!startInput || !endInput) {
+                statusDisplay.textContent = 'Please select both start and end times';
+                return;
+            }
+
+            const startTime = new Date(startInput);
+            const endTime = new Date(endInput);
+            
+            if (startTime >= endTime) {
+                statusDisplay.textContent = 'Start time must be before end time';
+                return;
+            }
+
+            
+            // Format dates for the API (ISO format)
+            const startISO = startTime.toISOString();
+            const endISO = endTime.toISOString();
+            
+            const playlistUrl = `/vod?start_time=${encodeURIComponent(startISO)}&end_time=${encodeURIComponent(endISO)}`;
+            
+            statusDisplay.textContent = 'Loading video...';
+            loadBtn.disabled = true;
+            
+            // Clean up previous HLS instance
+            if (hls) {
+                hls.destroy();
+            }
+            
+            if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = playlistUrl;
+                video.addEventListener('loadeddata', function() {
+                    statusDisplay.textContent = 'Video loaded successfully';
+                    loadBtn.disabled = false;
+                });
+                video.addEventListener('error', function() {
+                    statusDisplay.textContent = 'Error loading video';
+                    loadBtn.disabled = false;
+                });
+            } else if (Hls.isSupported()) {
+                // Use HLS.js for other browsers
+                hls = new Hls();
+                hls.loadSource(playlistUrl);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    statusDisplay.textContent = 'Video loaded successfully';
+                    loadBtn.disabled = false;
+                });
+                
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    statusDisplay.textContent = `Error loading video: ${data.details}`;
+                    loadBtn.disabled = false;
+                });
+            } else {
+                statusDisplay.textContent = 'HLS not supported in this browser';
+                loadBtn.disabled = false;
+            }
+        }
+
+        // Initialize with default times
+        initializeTimes();
+    </script>
+</body>
+</html>
